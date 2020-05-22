@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # DONE configure devices via environment variables
-#      BLCTL_DEVICES="acpi:acpi_video0:lvds;ddc:1:hdmi"
+#      BLCTL_DEVICES="sysfs:acpi_video0:lvds;ddc:1:hdmi"
 # DONE let's use devices that are not configured
 #      `set ddc#1 50`
 # TODO add command list, lists unconfigured devices and how to use them with this script
@@ -17,7 +17,7 @@
 # TODO bash autocompletion
 # TODO zsh autocompletion
 
-ACPI_PATH="/sys/class/backlight"
+SYSFS_PATH="/sys/class/backlight"
 CACHE_DIR="/tmp"
 
 # _calc_value() {
@@ -33,16 +33,16 @@ CACHE_DIR="/tmp"
 # }
 
 
-acpi_max() {
-    echo "$(<"$ACPI_PATH/$1/max_brightness")"
+sysfs_max() {
+    echo "$(<"$SYSFS_PATH/$1/max_brightness")"
 }
 
-acpi_get() {
-    echo "$(<"$ACPI_PATH/$1/brightness")"
+sysfs_get() {
+    echo "$(<"$SYSFS_PATH/$1/brightness")"
 }
 
-acpi_set() {
-    echo $2 > "$ACPI_PATH/$1/brightness"
+sysfs_set() {
+    echo $2 > "$SYSFS_PATH/$1/brightness"
 }
 
 _ddc_read() {
@@ -99,7 +99,7 @@ _call() {
         DEV="${PARTS[2]}"
         [[ -n $TARGET ]] && [[ "$TARGET" != "$NAME" ]] && continue
         case "$TYPE" in
-            acpi|ddc) _call_${CMD};;
+            sysfs|ddc) _call_${CMD};;
             *) echo "Invalid type '$TYPE'" ;;
         esac
     done
@@ -119,12 +119,16 @@ _call_set() {
 }
 
 _call_info() {
-    local VALUE STEPSIZE
+    local VALUE _TYPE
     local _VALUE=$(${TYPE}_get $DEV)
     local _MAX=$(${TYPE}_max $DEV)
     ((VALUE=_VALUE*100/_MAX))
+    case "$TYPE" in
+        sysfs) _TYPE="sysfs" ;;
+        ddc) _TYPE="DDC/CI" ;;
+    esac
     echo "Device: $NAME"
-    echo "    Type      $TYPE"
+    echo "    Type      $_TYPE"
     echo "    Config    $DEV_CONFIG"
     echo "    Current   $VALUE/100"
     echo "    Original  $_VALUE/$_MAX"

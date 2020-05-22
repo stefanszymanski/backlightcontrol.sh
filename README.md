@@ -1,6 +1,6 @@
 # backlightcontrol.sh
 
-Bash script for controlling display brightness via ACPI and DDC/CI
+Bash script for controlling display brightness via sysfs and DDC/CI
 
 ## Installation
 
@@ -23,7 +23,7 @@ WIP
 
 Set environment variable `BLCTL_DEVICES`.
 
-E.g. `export BLCTL_DEVICES="lvds:acpi:acpi_video0;hdmi:ddc:1"`
+E.g. `export BLCTL_DEVICES="lvds:sysfs:acpi_video0;hdmi:ddc:1"`
 
 Pattern is `name:type:identifier;...`
 
@@ -52,7 +52,7 @@ blc info hdmi
 
 # use devices that are not configured in $BLCTL_DEVICES
 # instead of providing a configured name, use `type#identifier`
-blc get acpi#acpi_video0
+blc get sysfs#acpi_video0
 blc set ddc#1 50
 blc info ddc#1
 ```
