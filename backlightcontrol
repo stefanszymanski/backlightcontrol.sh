@@ -155,7 +155,6 @@ run_info() {
     _call
 }
 
-BLCTL_DEVICES="lvds:acpi:acpi_video0;hdmi:ddc:1"
 IFS=$';' read -d "" -ra DEVICES <<< "$BLCTL_DEVICES;"
 
 CMD=$1
