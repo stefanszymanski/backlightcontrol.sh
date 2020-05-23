@@ -1,37 +1,50 @@
 #!/usr/bin/env bash
 
-# DONE configure devices via environment variables
-#      BLCTL_DEVICES="sysfs:acpi_video0:lvds;ddc:1:hdmi"
-# DONE let's use devices that are not configured
-#      `set ddc#1 50`
 # TODO add command list, lists unconfigured devices and how to use them with this script
 # TODO error handling: configured device does not exist
-# DONE add command set
-#      `set hdmi 50` - set specific device
-#      `set 50`      - set all devices
-# DONE add command get
-#      `get hdmi`    - get specific device
-#      `get`         - get all devices
-# DONE add command info, show configuration and original values
-# TODO add help command (including hint for `modprobe i2c-dev`)
 # TODO bash autocompletion
 # TODO zsh autocompletion
 
 SYSFS_PATH="/sys/class/backlight"
 CACHE_DIR="/tmp"
 
-# _calc_value() {
-#     local VALUE
-#     ((VALUE=$1*$2/100))
-#     echo $VALUE
-# }
+usage() {
+    read -rd '' __usage <<'EOF'
+Usage:
+    backlightcontrol <command> [arguments...]
 
-# _calc_value_reverse() {
-#     local VALUE
-#     ((VALUE=$1*100/$2))
-#     echo $VALUE
-# }
+Commands:
+    set [device] <value>    Set brightness for all of specific display
+                            The value must be an integer between 0 and 100
+    get [device]            Get brightness for all or specific display
+    info [device]           Get info about all or specific display
+    help                    Display this help text
 
+Device formats:
+    A device is either the configured name from environment variable
+    BLCTL_DEVICES or has the form `type#identifier`.
+
+Configuration:
+    Devices may be configured via environment variable BLCTL_DEVICES. The
+    configuration for each display consists of three parts and each display
+    configuration is divived by a semicolon: `name:type:identifier;...`. Valid
+    types are "sysfs" and "ddc". Valid identifiers for "sysfs" are names of
+    directories in /sys/class/backlight/, for "ddc" it's a bus number expected
+    from the --bus argument of `ddcutil`.
+
+Examples:
+    export BLCTL_DEVICES="lvds:sysfs:acpi_video0;hdmi:ddc:3"
+    backlightcontrol set 50
+    backlightcontrol set lvds 50
+    backlightcontrol set sysfs#acpi_video1 50
+    backlightcontrol set ddc#2 50
+    backlightcontrol get
+    backlightcontrol get hdmi
+    backlightcontrol info lvds
+EOF
+    printf '%s\n' "$__usage"
+    exit 0
+}
 
 sysfs_max() {
     echo "$(<"$SYSFS_PATH/$1/max_brightness")"
@@ -42,21 +55,19 @@ sysfs_get() {
 }
 
 sysfs_set() {
-    echo $2 > "$SYSFS_PATH/$1/brightness"
+    echo "$2" > "$SYSFS_PATH/$1/brightness"
 }
 
 _ddc_read() {
-    local OUT=$(ddcutil -d $1 getvcp 10)
-    local MAX CUR
-    [[ $OUT =~ max[[:space:]]*value[[:space:]]*=[[:space:]]*([0-9]+) ]] && MAX=${BASH_REMATCH[1]}
-    [[ $OUT =~ current[[:space:]]*value[[:space:]]*=[[:space:]]*([0-9]+) ]] && CUR=${BASH_REMATCH[1]}
-    echo "$CUR"
-    echo "$MAX"
+    local PARTS
+    IFS=$' ' read -d "" -ra PARTS <<< "$(ddcutil --terse --bus="$1" getvcp 10)"
+    printf '%s ' "${PARTS[@]:3:2}"
 }
 
 _ddc_cache_create() {
-    local VALUES=($(_ddc_read $1))
-    echo "${VALUES[1]}" > "$CACHE_DIR/brightness_ddc_max_$1"
+    local PARTS
+    IFS=$' ' read -d "" -ra PARTS <<< "$(_ddc_read "$1")"
+    echo "${PARTS[1]}" > "$CACHE_DIR/brightness_ddc_max_$1"
 }
 
 _ddc_max_cache_name() {
@@ -64,19 +75,20 @@ _ddc_max_cache_name() {
 }
 
 ddc_max() {
-    local DEV=$1
-    local FILE=$(_ddc_max_cache_name $DEV)
+    local FILE DEV=$1
+    FILE=$(_ddc_max_cache_name "$DEV")
     [[ ! -r "$FILE" ]] && _ddc_cache_create "$DEV"
     echo "$(<"$FILE")"
 }
 
 ddc_get() {
-    local VALUES=($(_ddc_read $1))
-    echo "${VALUES[0]}"
+    local PARTS
+    IFS=$' ' read -d "" -ra PARTS <<< "$(_ddc_read "$1")"
+    echo "${PARTS[0]}"
 }
 
 ddc_set() {
-    ddcutil -d $1 setvcp 10 $2
+    ddcutil --bus="$1" setvcp 10 "$2"
 }
 
 parse_target() {
@@ -92,36 +104,38 @@ _call() {
     local NAME TYPE DEV
     parse_target "$TARGET"
     for DEV_CONFIG in "${DEVICES[@]}"; do
-        IFS=':' read -d "" -ra PARTS <<< "$DEV_CONFIG"
-        [[ "${PARTS[@]}" < 3 ]] && continue
+        IFS=':' read -d "" -ra PARTS <<< "$DEV_CONFIG:"
+        [[ "${#PARTS[@]}" -lt 3 ]] && continue
         NAME="${PARTS[0]}"
         TYPE="${PARTS[1]}"
         DEV="${PARTS[2]}"
         [[ -n $TARGET ]] && [[ "$TARGET" != "$NAME" ]] && continue
         case "$TYPE" in
-            sysfs|ddc) _call_${CMD};;
+            sysfs|ddc) _call_"${CMD}";;
             *) echo "Invalid type '$TYPE'" ;;
         esac
     done
 }
 
 _call_get() {
-    local _VALUE=$(${TYPE}_get $DEV)
-    local _MAX=$(${TYPE}_max $DEV)
+    local _VALUE _MAX
+    _VALUE=$("${TYPE}"_get "$DEV")
+    _MAX=$("${TYPE}"_max "$DEV")
     ((VALUE=_VALUE*100/_MAX))
     echo "$NAME $VALUE"
 }
 
 _call_set() {
-    local _MAX=$(${TYPE}_max $DEV)
+    local _MAX
+    _MAX=$("${TYPE}"_max "$DEV")
     ((_VALUE=_MAX*VALUE/100))
-    $(${TYPE}_set $DEV $_VALUE)
+    "${TYPE}"_set "$DEV" "$_VALUE"
 }
 
 _call_info() {
-    local VALUE _TYPE
-    local _VALUE=$(${TYPE}_get $DEV)
-    local _MAX=$(${TYPE}_max $DEV)
+    local VALUE _TYPE _VALUE _MAX
+    _VALUE=$("${TYPE}"_get "$DEV")
+    _MAX=$("${TYPE}"_max "$DEV")
     ((VALUE=_VALUE*100/_MAX))
     case "$TYPE" in
         sysfs) _TYPE="sysfs" ;;
@@ -165,8 +179,8 @@ CMD=$1
 shift
 
 case "$CMD" in
-    set|s) run_set $@ ;;
-    get|g) run_get $@ ;;
-    info|i) run_info $@ ;;
-    *) echo "help: not implemented, yet";;
+    set|s) run_set "$@" ;;
+    get|g) run_get "$@" ;;
+    info|i) run_info "$@" ;;
+    *) usage ;;
 esac
