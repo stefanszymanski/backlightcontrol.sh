@@ -9,7 +9,8 @@ SYSFS_PATH="/sys/class/backlight"
 CACHE_DIR="/tmp"
 
 usage() {
-    read -rd '' __usage <<'EOF'
+    local _usage
+    read -rd '' _usage <<'EOF'
 Usage:
     backlightcontrol <command> [arguments...]
 
@@ -21,7 +22,7 @@ Commands:
     help                    Display this help text
 
 Device formats:
-    A device is either the configured name from environment variable
+    A device is either a configured name from environment variable
     BLCTL_DEVICES or has the form `type#identifier`.
 
 Configuration:
@@ -42,8 +43,8 @@ Examples:
     backlightcontrol get hdmi
     backlightcontrol info lvds
 EOF
-    printf '%s\n' "$__usage"
-    exit 0
+    printf '%s\n' "$_usage"
+    exit "$1"
 }
 
 sysfs_max() {
@@ -59,32 +60,30 @@ sysfs_set() {
 }
 
 _ddc_read() {
-    local PARTS
-    IFS=$' ' read -d "" -ra PARTS <<< "$(ddcutil --terse --bus="$1" getvcp 10)"
-    printf '%s ' "${PARTS[@]:3:2}"
-}
-
-_ddc_cache_create() {
-    local PARTS
-    IFS=$' ' read -d "" -ra PARTS <<< "$(_ddc_read "$1")"
-    echo "${PARTS[1]}" > "$CACHE_DIR/brightness_ddc_max_$1"
+    ddcutil --terse --bus="$1" getvcp 10
 }
 
 _ddc_max_cache_name() {
     echo "$CACHE_DIR/brightness_ddc_max_$1"
 }
 
+_ddc_cache_create() {
+    local PARTS
+    IFS=$' ' read -d "" -ra PARTS <<< "$(_ddc_read "$1")"
+    echo "${PARTS[4]}" > "$(_ddc_max_cache_name "$1")"
+}
+
 ddc_max() {
-    local FILE DEV=$1
-    FILE=$(_ddc_max_cache_name "$DEV")
-    [[ ! -r "$FILE" ]] && _ddc_cache_create "$DEV"
+    local FILE
+    FILE=$(_ddc_max_cache_name "$1")
+    [[ ! -r "$FILE" ]] && _ddc_cache_create "$1"
     echo "$(<"$FILE")"
 }
 
 ddc_get() {
     local PARTS
     IFS=$' ' read -d "" -ra PARTS <<< "$(_ddc_read "$1")"
-    echo "${PARTS[0]}"
+    echo "${PARTS[3]}"
 }
 
 ddc_set() {
@@ -175,12 +174,15 @@ run_info() {
 
 IFS=$';' read -d "" -ra DEVICES <<< "$BLCTL_DEVICES;"
 
-CMD=$1
+_CMD=$1
 shift
 
-case "$CMD" in
-    set|s) run_set "$@" ;;
-    get|g) run_get "$@" ;;
-    info|i) run_info "$@" ;;
-    *) usage ;;
+case "$_CMD" in
+    set|s) CMD="set" ;;
+    get|g) CMD="get" ;;
+    info|i) CMD="info" ;;
+    help|h) usage 0 ;;
+    *) usage 1 ;;
 esac
+
+run_"${CMD}" "$@"
